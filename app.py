@@ -95,3 +95,39 @@ with tab_about:
     - The assistant does not issue refunds/certificates, grade learners, send messages or update production systems.
     - LLM output is advisory. Rules determine priority and human review remains in control.
     """)
+
+
+
+import sqlite3
+import pandas as pd
+import streamlit as st
+
+st.divider()
+st.subheader("📊 Universal Triage Analytics")
+
+try:
+    # Adjust the DB path/table name if your config.py uses a different filename
+    conn = sqlite3.connect("complaints.db")
+    tables = pd.read_sql_query("SELECT name FROM sqlite_master WHERE type='table';", conn)
+    if not tables.empty:
+        table_name = tables["name"].iloc[0]
+        df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
+        if not df.empty:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                if "priority" in df.columns:
+                    st.caption("Complaints by Priority (P0–P3)")
+                    st.bar_chart(df["priority"].value_counts())
+            with col2:
+                if "queue" in df.columns:
+                    st.caption("Complaints by Support Queue")
+                    st.bar_chart(df["queue"].value_counts())
+            with col3:
+                if "category" in df.columns:
+                    st.caption("Complaints by Category")
+                    st.bar_chart(df["category"].value_counts())
+        else:
+            st.info("Submit a complaint above to populate the live triage charts.")
+    conn.close()
+except Exception as e:
+    st.caption(f"Analytics unavailable: {e}")
