@@ -96,7 +96,7 @@ with tab_about:
     - LLM output is advisory. Rules determine priority and human review remains in control.
     """)
 
-
+import glob
 import sqlite3
 import pandas as pd
 import streamlit as st
@@ -105,28 +105,41 @@ st.divider()
 st.subheader("📊 Universal Triage Analytics")
 
 try:
-    # Adjust the DB path/table name if your config.py uses a different filename
-    conn = sqlite3.connect("complaints.db")
-    tables = pd.read_sql_query("SELECT name FROM sqlite_master WHERE type='table';", conn)
-    if not tables.empty:
-        table_name = tables["name"].iloc[0]
-        df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
+    # Automatically locate the project's actual SQLite database file (ignoring empty complaints.db)
+    db_files = [f for f in glob.glob("**/*.db", recursive=True) if f != "complaints.db"] or glob.glob("**/*.db", recursive=True)
+    df = pd.DataFrame()
+
+    for db_path in db_files:
+        conn = sqlite3.connect(db_path)
+        tables = pd.read_sql_query("SELECT name FROM sqlite_master WHERE type='table';", conn)
+        for tbl in tables["name"]:
+            temp_df = pd.read_sql_query(f"SELECT * FROM {tbl}", conn)
+            if not temp_df.empty and any(c in temp_df.columns for c in ["priority", "final_priority", "queue", "category"]):
+                df = temp_df
+                break
+        conn.close()
         if not df.empty:
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                if "priority" in df.columns:
-                    st.caption("Complaints by Priority (P0–P3)")
-                    st.bar_chart(df["priority"].value_counts())
-            with col2:
-                if "queue" in df.columns:
-                    st.caption("Complaints by Support Queue")
-                    st.bar_chart(df["queue"].value_counts())
-            with col3:
-                if "category" in df.columns:
-                    st.caption("Complaints by Category")
-                    st.bar_chart(df["category"].value_counts())
-        else:
-            st.info("Submit a complaint above to populate the live triage charts.")
-    conn.close()
+            break
+
+    if not df.empty:
+        priority_col = "priority" if "priority" in df.columns else ("final_priority" if "final_priority" in df.columns else None)
+        queue_col = "queue" if "queue" in df.columns else ("recommended_queue" if "recommended_queue" in df.columns else None)
+        cat_col = "category" if "category" in df.columns else ("detected_category" if "detected_category" in df.columns else None)
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if priority_col:
+                st.caption("Complaints by Priority (P0–P3)")
+                st.bar_chart(df[priority_col].value_counts())
+        with col2:
+            if queue_col:
+                st.caption("Complaints by Support Queue")
+                st.bar_chart(df[queue_col].value_counts())
+        with col3:
+            if cat_col:
+                st.caption("Complaints by Category")
+                st.bar_chart(df[cat_col].value_counts())
+    else:
+        st.info("No saved complaints found in the database yet—submit a complaint above to generate the bar charts.")
 except Exception as e:
-    st.caption(f"Analytics unavailable: {e}")
+    st.caption(f"Analytics error: {e}")
