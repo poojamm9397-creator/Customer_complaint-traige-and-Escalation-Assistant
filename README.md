@@ -165,3 +165,35 @@ project_033_customer_complaint_triage/
     ├── test_rules.py
     └── test_workflow.py
 ```
+## System Architecture & Triage Decision Flow
+
+```mermaid
+flowchart TD
+    A[Customer Complaint Submitted] --> B[Input Validation<br/>validators.py]
+    B --> C{LLM API Key<br/>Configured?}
+    
+    C -- Yes --> D[LLM Classification & Extraction<br/>llm_client.py + prompts.py]
+    C -- No (Offline Mode) --> E[Rule-Based NLP Extraction<br/>nlp.py]
+    
+    D --> F[Detected Category +<br/>Urgency Phrases]
+    E --> F
+
+    F --> G{Category == safety_legal OR<br/>Phrase in: safety risk,<br/>legal notice, threat?}
+    G -- Yes --> H[Priority: P0<br/>Queue: Trust & Safety<br/>Human Review: Required]
+
+    G -- No --> I{Phrase in: urgent,<br/>immediately, right now,<br/>today, due today, deadline?}
+    I -- Yes --> J[Priority: P1<br/>Queue: Priority Support<br/>Human Review: Required]
+
+    I -- No --> K{Category == other?}
+    K -- Yes --> L[Priority: P3<br/>Queue: General Support<br/>Human Review: Not Required]
+    K -- No --> M[Priority: P2<br/>Queue: Category-Specific Queue<br/>Human Review: Not Required]
+
+    H --> N[(Save to SQLite Database<br/>database.py / schema.sql)]
+    J --> N
+    L --> N
+    M --> N
+
+    N --> O{Human Review<br/>Required?}
+    O -- Yes --> P[Reviewer Dashboard<br/>Approve / Needs Follow-Up]
+    O -- No --> Q[Auto-Routed to Support Queue]
+```
