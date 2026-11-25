@@ -1,4 +1,12 @@
-import streamlit as st
+try:
+    import streamlit as st  # type: ignore[import-not-found]
+except ModuleNotFoundError as exc:
+    if exc.name != "streamlit":
+        raise
+    raise SystemExit(
+        "Streamlit is required to run this app. Install it in the active Python "
+        "environment with: python -m pip install streamlit"
+    ) from exc
 from workflow import TriageWorkflow
 from database import init_db, list_cases, get_case, update_review
 from config import get_settings
@@ -98,48 +106,52 @@ with tab_about:
 
 import glob
 import sqlite3
-import pandas as pd
-import streamlit as st
+from collections import Counter
 
+# Example inside your Case Review section in app.py:
 st.divider()
 st.subheader("📊 Universal Triage Analytics")
 
 try:
-    # Automatically locate the project's actual SQLite database file (ignoring empty complaints.db)
-    db_files = [f for f in glob.glob("**/*.db", recursive=True) if f != "complaints.db"] or glob.glob("**/*.db", recursive=True)
-    df = pd.DataFrame()
+        db_files = [f for f in glob.glob("**/*.db", recursive=True) if f != "complaints.db"] or glob.glob("**/*.db", recursive=True)
+        records = []
 
-    for db_path in db_files:
-        conn = sqlite3.connect(db_path)
-        tables = pd.read_sql_query("SELECT name FROM sqlite_master WHERE type='table';", conn)
-        for tbl in tables["name"]:
-            temp_df = pd.read_sql_query(f"SELECT * FROM {tbl}", conn)
-            if not temp_df.empty and any(c in temp_df.columns for c in ["priority", "final_priority", "queue", "category"]):
-                df = temp_df
+        for db_path in db_files:
+            conn = sqlite3.connect(db_path)
+            tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+            for (tbl,) in tables:
+                # Quote the table identifier returned by SQLite metadata.
+                quoted_table = '"' + tbl.replace('"', '""') + '"'
+                cursor = conn.execute(f"SELECT * FROM {quoted_table}")
+                columns = [description[0] for description in cursor.description]
+                temp_records = [dict(zip(columns, row)) for row in cursor.fetchall()]
+                if temp_records and any(c in columns for c in ["priority", "final_priority", "queue", "category"]):
+                    records = temp_records
+                    break
+            conn.close()
+            if records:
                 break
-        conn.close()
-        if not df.empty:
-            break
 
-    if not df.empty:
-        priority_col = "priority" if "priority" in df.columns else ("final_priority" if "final_priority" in df.columns else None)
-        queue_col = "queue" if "queue" in df.columns else ("recommended_queue" if "recommended_queue" in df.columns else None)
-        cat_col = "category" if "category" in df.columns else ("detected_category" if "detected_category" in df.columns else None)
+        if records:
+            columns = records[0].keys()
+            priority_col = "priority" if "priority" in columns else ("final_priority" if "final_priority" in columns else None)
+            queue_col = "queue" if "queue" in columns else ("recommended_queue" if "recommended_queue" in columns else None)
+            cat_col = "category" if "category" in columns else ("detected_category" if "detected_category" in columns else None)
 
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            if priority_col:
-                st.caption("Complaints by Priority (P0–P3)")
-                st.bar_chart(df[priority_col].value_counts())
-        with col2:
-            if queue_col:
-                st.caption("Complaints by Support Queue")
-                st.bar_chart(df[queue_col].value_counts())
-        with col3:
-            if cat_col:
-                st.caption("Complaints by Category")
-                st.bar_chart(df[cat_col].value_counts())
-    else:
-        st.info("No saved complaints found in the database yet—submit a complaint above to generate the bar charts.")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                if priority_col:
+                    st.caption("Complaints by Priority (P0–P3)")
+                    st.bar_chart(dict(Counter(str(row[priority_col]) for row in records)))
+            with col2:
+                if queue_col:
+                    st.caption("Complaints by Support Queue")
+                    st.bar_chart(dict(Counter(str(row[queue_col]) for row in records)))
+            with col3:
+                if cat_col:
+                    st.caption("Complaints by Category")
+                    st.bar_chart(dict(Counter(str(row[cat_col]) for row in records)))
+        else:
+            st.info("No saved complaints found in the database yet.")
 except Exception as e:
-    st.caption(f"Analytics error: {e}")
+        st.caption(f"Analytics error: {e}")
